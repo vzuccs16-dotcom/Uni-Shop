@@ -148,11 +148,11 @@ async function addItem() {
   renderContent();
 
   urlInput.value = '';
-  showFeedback('Fetching product name…', 'success');
+  showFeedback('Added! Fetching product name…', 'success');
   urlInput.focus();
 
   // Fetch product title in background
-  const title = await fetchProductTitle(url, domain);
+  const title = await fetchProductTitle(url);
 
   // Update stored item with title
   const stored = getItems(activeId);
@@ -166,30 +166,28 @@ async function addItem() {
   showFeedback('Added to your list ✓', 'success');
 }
 
-async function fetchProductTitle(url, domain) {
+async function fetchProductTitle(url) {
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{
-          role: 'user',
-          content: `Fetch this product URL and return ONLY the product name/title as plain text, nothing else. No punctuation at the end, no explanation. URL: ${url}`
-        }]
-      })
-    });
+    // Use allorigins as a CORS proxy to fetch the raw HTML, then extract <title>
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const html = data.contents || '';
 
-    const data = await response.json();
-    // Extract the last text block (after tool use)
-    const textBlocks = (data.content || []).filter(b => b.type === 'text');
-    const raw = textBlocks.length > 0 ? textBlocks[textBlocks.length - 1].text.trim() : null;
+    // Pull the <title> tag
+    const match = html.match(/<title[^>]*>([^<]{1,300})<\/title>/i);
+    if (!match) return null;
 
-    // Sanity check — reject if it looks like an error or is too long
-    if (!raw || raw.length > 200 || raw.toLowerCase().includes('error')) return null;
-    return raw;
+    let title = match[1]
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ')
+      .trim();
+
+    // Strip common site-name suffixes like "Product Name | Amazon" or "Product - Site"
+    title = title.replace(/\s*[\|\-–—:]\s*.{2,40}$/, '').trim();
+
+    return title.length > 0 ? title : null;
   } catch {
     return null;
   }
