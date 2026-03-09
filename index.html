@@ -1,404 +1,122 @@
-// ===== STORAGE SCHEMA =====
-// localStorage['usl_lists']  → [{ id, name, createdAt }]
-// localStorage['usl_items_<id>'] → [{ url, domain, addedAt }]
-// localStorage['usl_active'] → listId
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Universal Shopping List</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
 
-const LS_LISTS  = 'usl_lists';
-const LS_ACTIVE = 'usl_active';
-const itemsKey  = id => `usl_items_${id}`;
+  <div class="noise"></div>
 
-// ===== STATE =====
-let lists      = [];   // [{id, name, createdAt}]
-let activeId   = null; // currently selected list id
-let modalMode  = null; // 'new' | 'rename'
-
-// ===== DOM =====
-const listsNav       = document.getElementById('listsNav');
-const currentListName= document.getElementById('currentListName');
-const mobileListName = document.getElementById('mobileListName');
-const itemCountBadge = document.getElementById('itemCountBadge');
-const clearAllBtn    = document.getElementById('clearAllBtn');
-const urlInput       = document.getElementById('urlInput');
-const feedbackMsg    = document.getElementById('feedbackMsg');
-const productList    = document.getElementById('productList');
-const emptyState     = document.getElementById('emptyState');
-const modalBackdrop  = document.getElementById('modalBackdrop');
-const modal          = document.getElementById('modal');
-const modalTitle     = document.getElementById('modalTitle');
-const modalInput     = document.getElementById('modalInput');
-const sidebar        = document.getElementById('sidebar');
-const sidebarOverlay = document.getElementById('sidebarOverlay');
-
-// ===== INIT =====
-document.addEventListener('DOMContentLoaded', () => {
-  loadLists();
-
-  if (lists.length === 0) {
-    createList('My List', false);
-  } else {
-    const savedActive = localStorage.getItem(LS_ACTIVE);
-    activeId = lists.find(l => l.id === savedActive) ? savedActive : lists[0].id;
-  }
-
-  renderSidebar();
-  renderContent();
-
-  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
-  urlInput.addEventListener('input',   () => clearFeedback());
-  modalInput.addEventListener('keydown', e => { if (e.key === 'Enter') confirmModal(); });
-});
-
-// ===== LIST STORAGE =====
-function loadLists() {
-  try { lists = JSON.parse(localStorage.getItem(LS_LISTS)) || []; }
-  catch { lists = []; }
-}
-
-function saveLists() {
-  localStorage.setItem(LS_LISTS, JSON.stringify(lists));
-  localStorage.setItem(LS_ACTIVE, activeId);
-}
-
-function getItems(id) {
-  try { return JSON.parse(localStorage.getItem(itemsKey(id))) || []; }
-  catch { return []; }
-}
-
-function saveItems(id, items) {
-  localStorage.setItem(itemsKey(id), JSON.stringify(items));
-}
-
-// ===== LIST ACTIONS =====
-function createList(name, switchTo = true) {
-  const id = 'list_' + Date.now();
-  lists.push({ id, name, createdAt: Date.now() });
-  saveItems(id, []);
-  if (switchTo || lists.length === 1) {
-    activeId = id;
-  }
-  saveLists();
-  renderSidebar();
-  if (switchTo) renderContent();
-}
-
-function switchList(id) {
-  activeId = id;
-  saveLists();
-  renderSidebar();
-  renderContent();
-  clearFeedback();
-  closeSidebar();
-}
-
-function deleteList(id, e) {
-  if (e) e.stopPropagation();
-  const list = lists.find(l => l.id === id);
-  if (!list) return;
-
-  const items = getItems(id);
-  const msg = items.length > 0
-    ? `Delete "${list.name}" and its ${items.length} item(s)?`
-    : `Delete "${list.name}"?`;
-
-  if (!confirm(msg)) return;
-
-  localStorage.removeItem(itemsKey(id));
-  lists = lists.filter(l => l.id !== id);
-  saveLists();
-
-  if (lists.length === 0) {
-    createList('My List', true);
-    return;
-  }
-
-  if (activeId === id) {
-    activeId = lists[0].id;
-    saveLists();
-  }
-
-  renderSidebar();
-  renderContent();
-}
-
-function renameList(id, newName) {
-  const list = lists.find(l => l.id === id);
-  if (!list) return;
-  list.name = newName.trim();
-  saveLists();
-  renderSidebar();
-  renderContent();
-}
-
-// ===== ITEM ACTIONS =====
-async function addItem() {
-  const raw = urlInput.value.trim();
-  if (!raw) { showFeedback('Please paste a product URL first.', 'error'); urlInput.focus(); return; }
-
-  const url = raw.startsWith('http') ? raw : 'https://' + raw;
-  if (!isValidUrl(url)) { showFeedback("That doesn't look like a valid URL.", 'error'); return; }
-
-  const items = getItems(activeId);
-  if (items.some(i => i.url === url)) { showFeedback('Item already in list.', 'error'); return; }
-
-  // Optimistically add with loading title
-  const domain = extractDomain(url);
-  const newItem = { url, domain, title: null, addedAt: Date.now() };
-  items.unshift(newItem);
-  saveItems(activeId, items);
-  renderContent();
-
-  urlInput.value = '';
-  showFeedback('Added! Fetching product name…', 'success');
-  urlInput.focus();
-
-  // Fetch product title in background
-  const title = await fetchProductTitle(url);
-
-  // Update stored item with title
-  const stored = getItems(activeId);
-  const target = stored.find(i => i.url === url);
-  if (target) {
-    target.title = title;
-    saveItems(activeId, stored);
-    renderContent();
-  }
-
-  showFeedback('Added to your list ✓', 'success');
-}
-
-async function fetchProductTitle(url) {
-  try {
-    // Use allorigins as a CORS proxy to fetch the raw HTML, then extract <title>
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const html = data.contents || '';
-
-    // Pull the <title> tag
-    const match = html.match(/<title[^>]*>([^<]{1,300})<\/title>/i);
-    if (!match) return null;
-
-    let title = match[1]
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ')
-      .trim();
-
-    // Strip common site-name suffixes like "Product Name | Amazon" or "Product - Site"
-    title = title.replace(/\s*[\|\-–—:]\s*.{2,40}$/, '').trim();
-
-    return title.length > 0 ? title : null;
-  } catch {
-    return null;
-  }
-}
-
-function removeItem(url) {
-  let items = getItems(activeId);
-  items = items.filter(i => i.url !== url);
-  saveItems(activeId, items);
-  renderContent();
-  clearFeedback();
-}
-
-function clearAll() {
-  const items = getItems(activeId);
-  if (items.length === 0) return;
-  if (!confirm(`Remove all ${items.length} item(s) from this list?`)) return;
-  saveItems(activeId, []);
-  renderContent();
-  showFeedback('List cleared.', 'success');
-}
-
-// exposed globally for delete button in list nav
-function deleteCurrentList() {
-  deleteList(activeId, null);
-}
-
-// ===== RENDER SIDEBAR =====
-function renderSidebar() {
-  listsNav.innerHTML = '';
-  lists.forEach(list => {
-    const items = getItems(list.id);
-    const count = items.length;
-    const isActive = list.id === activeId;
-
-    const li = document.createElement('li');
-    li.className = 'nav-item' + (isActive ? ' active' : '');
-
-    li.innerHTML = `
-      <button class="nav-item-btn" onclick="switchList('${list.id}')">
-        <span class="nav-item-name" title="${escapeHtml(list.name)}">${escapeHtml(list.name)}</span>
-        <span class="nav-item-count">${count} ${count === 1 ? 'item' : 'items'}</span>
-      </button>
-      <button class="nav-item-delete" title="Delete list" onclick="deleteList('${list.id}', event)">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-      </button>
-    `;
-
-    listsNav.appendChild(li);
-  });
-}
-
-// ===== RENDER CONTENT =====
-function renderContent() {
-  const list  = lists.find(l => l.id === activeId);
-  const items = getItems(activeId);
-  const count = items.length;
-
-  const name = list ? list.name : 'My List';
-  currentListName.textContent = name;
-  mobileListName.textContent  = name;
-  itemCountBadge.textContent  = count === 1 ? '1 item' : `${count} items`;
-  clearAllBtn.style.visibility = count > 0 ? 'visible' : 'hidden';
-
-  productList.innerHTML = '';
-
-  if (count === 0) {
-    emptyState.classList.add('visible');
-    return;
-  }
-
-  emptyState.classList.remove('visible');
-  items.forEach(item => productList.appendChild(createListItem(item)));
-}
-
-function createListItem({ url, domain, title }) {
-  const li = document.createElement('li');
-  li.className = 'product-item';
-
-  const displayUrl = url.length > 62 ? url.slice(0, 62) + '\u2026' : url;
-  const initials   = domain.split('.')[0].slice(0, 2).toUpperCase();
-
-  const titleHtml = title
-    ? `<span class="item-title">${escapeHtml(title)}</span>`
-    : `<span class="item-title item-title--loading">
-        <span class="loading-dots"><span></span><span></span><span></span></span>
-        Fetching name…
-       </span>`;
-
-  li.innerHTML = `
-    <div class="favicon-wrap" title="${escapeHtml(domain)}">
-      <img src="https://www.google.com/s2/favicons?sz=64&domain=${escapeHtml(domain)}"
-           alt="${escapeHtml(domain)}"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
-      <span class="favicon-fallback" style="display:none">${escapeHtml(initials)}</span>
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo-icon">🛒</span>
+      <span class="sidebar-title">My Lists</span>
     </div>
-    <div class="item-info">
-      ${titleHtml}
-      <span class="item-domain">${escapeHtml(domain)}</span>
-      <span class="item-url" title="${escapeHtml(url)}">${escapeHtml(displayUrl)}</span>
-    </div>
-    <div class="item-actions">
-      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="open-btn">
-        Open
-        <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-          <path d="M2 9L9 2M9 2H4M9 2v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <ul class="lists-nav" id="listsNav"></ul>
+
+    <div class="sidebar-footer">
+      <button class="new-list-btn" onclick="promptNewList()">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-      </a>
-      <button class="remove-btn" title="Remove" onclick="removeItem('${escapeAttr(url)}')">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
+        New list
       </button>
     </div>
-  `;
+  </aside>
 
-  return li;
-}
+  <!-- MOBILE TOP BAR -->
+  <div class="mobile-bar">
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <span class="mobile-list-name" id="mobileListName">Shopping List</span>
+  </div>
 
-// ===== MODAL =====
-function promptNewList() {
-  modalMode = 'new';
-  modalTitle.textContent = 'New List';
-  modalInput.value = '';
-  modalInput.placeholder = 'e.g. Birthday gifts';
-  document.querySelector('.modal-confirm').textContent = 'Create';
-  openModal();
-}
+  <!-- OVERLAY for mobile sidebar -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-function promptRenameList() {
-  const list = lists.find(l => l.id === activeId);
-  if (!list) return;
-  modalMode = 'rename';
-  modalTitle.textContent = 'Rename List';
-  modalInput.value = list.name;
-  modalInput.placeholder = 'List name';
-  document.querySelector('.modal-confirm').textContent = 'Rename';
-  openModal();
-}
+  <!-- MAIN CONTENT -->
+  <div class="app-layout">
+    <main class="content">
 
-function openModal() {
-  modalBackdrop.classList.add('open');
-  modal.classList.add('open');
-  setTimeout(() => modalInput.focus(), 50);
-}
+      <div class="content-header">
+        <div class="content-title-row">
+          <h1 class="content-title" id="currentListName">My List</h1>
+          <div class="content-title-actions">
+            <button class="icon-btn rename-btn" title="Rename list" onclick="promptRenameList()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="icon-btn delete-list-btn" title="Delete this list" onclick="deleteCurrentList()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2 3.5h10M5 3.5V2h4v1.5M5.5 6v4M8.5 6v4M3 3.5l.75 8h6.5l.75-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="item-count-badge" id="itemCountBadge">0 items</div>
+      </div>
 
-function closeModal() {
-  modalBackdrop.classList.remove('open');
-  modal.classList.remove('open');
-  modalMode = null;
-}
+      <section class="input-section">
+        <div class="input-row">
+          <div class="input-wrapper">
+            <span class="input-prefix">URL</span>
+            <input
+              type="url"
+              id="urlInput"
+              placeholder="https://amazon.com/product/..."
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button id="addBtn" onclick="addItem()">
+            <span>Add</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="feedback-msg" id="feedbackMsg"></div>
+      </section>
 
-function confirmModal() {
-  const name = modalInput.value.trim();
-  if (!name) { modalInput.focus(); return; }
+      <section class="list-section">
+        <div class="list-header">
+          <h2>Items</h2>
+          <button class="clear-all-btn" id="clearAllBtn" onclick="clearAll()">Clear all</button>
+        </div>
 
-  if (modalMode === 'new') {
-    createList(name, true);
-  } else if (modalMode === 'rename') {
-    renameList(activeId, name);
-  }
+        <ul class="product-list" id="productList"></ul>
 
-  closeModal();
-}
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">📋</div>
+          <p>No items yet.<br>Paste a link above to get started.</p>
+        </div>
+      </section>
 
-// ===== MOBILE SIDEBAR =====
-function toggleSidebar() {
-  sidebar.classList.toggle('open');
-  sidebarOverlay.classList.toggle('open');
-}
+    </main>
+  </div>
 
-function closeSidebar() {
-  sidebar.classList.remove('open');
-  sidebarOverlay.classList.remove('open');
-}
+  <!-- MODAL -->
+  <div class="modal-backdrop" id="modalBackdrop" onclick="closeModal()"></div>
+  <div class="modal" id="modal">
+    <h3 class="modal-title" id="modalTitle">New List</h3>
+    <input type="text" class="modal-input" id="modalInput" placeholder="e.g. Birthday gifts" maxlength="40" />
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm" onclick="confirmModal()">Create</button>
+    </div>
+  </div>
 
-// ===== FEEDBACK =====
-let feedbackTimer = null;
-
-function showFeedback(msg, type = 'error') {
-  clearTimeout(feedbackTimer);
-  feedbackMsg.textContent = msg;
-  feedbackMsg.className = 'feedback-msg ' + type;
-  feedbackTimer = setTimeout(clearFeedback, 3500);
-}
-
-function clearFeedback() {
-  feedbackMsg.textContent = '';
-  feedbackMsg.className = 'feedback-msg';
-}
-
-// ===== URL UTILS =====
-function extractDomain(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); }
-  catch { return url; }
-}
-
-function isValidUrl(url) {
-  try { const u = new URL(url); return u.protocol === 'http:' || u.protocol === 'https:'; }
-  catch { return false; }
-}
-
-// ===== SECURITY =====
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}
-
-function escapeAttr(str) {
-  return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-}
+  <script src="script.js"></script>
+</body>
+</html>
