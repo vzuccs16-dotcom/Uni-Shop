@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Universal Shopping List</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="noise"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo-icon">🛒</span>
+      <span class="sidebar-title">My Lists</span>
+    </div>
+
+    <ul class="lists-nav" id="listsNav"></ul>
+
+    <div class="sidebar-footer">
+      <button class="new-list-btn" onclick="promptNewList()">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        New list
+      </button>
+    </div>
+  </aside>
+
+  <!-- MOBILE TOP BAR -->
+  <div class="mobile-bar">
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <span class="mobile-list-name" id="mobileListName">Shopping List</span>
+  </div>
+
+  <!-- OVERLAY for mobile sidebar -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+  <!-- MAIN CONTENT -->
+  <div class="app-layout">
+    <main class="content">
+
+      <div class="content-header">
+        <div class="content-title-row">
+          <h1 class="content-title" id="currentListName">My List</h1>
+          <div class="content-title-actions">
+            <button class="icon-btn rename-btn" title="Rename list" onclick="promptRenameList()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="icon-btn delete-list-btn" title="Delete this list" onclick="deleteCurrentList()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2 3.5h10M5 3.5V2h4v1.5M5.5 6v4M8.5 6v4M3 3.5l.75 8h6.5l.75-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="item-count-badge" id="itemCountBadge">0 items</div>
+      </div>
+
+      <section class="input-section">
+        <div class="input-row">
+          <div class="input-wrapper">
+            <span class="input-prefix">URL</span>
+            <input
+              type="url"
+              id="urlInput"
+              placeholder="https://amazon.com/product/..."
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button id="addBtn" onclick="addItem()">
+            <span>Add</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="feedback-msg" id="feedbackMsg"></div>
+      </section>
+
+      <section class="list-section">
+        <div class="list-header">
+          <h2>Items</h2>
+          <button class="clear-all-btn" id="clearAllBtn" onclick="clearAll()">Clear all</button>
+        </div>
+
+        <ul class="product-list" id="productList"></ul>
+
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">📋</div>
+          <p>No items yet.<br>Paste a link above to get started.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal-backdrop" id="modalBackdrop" onclick="closeModal()"></div>
+  <div class="modal" id="modal">
+    <h3 class="modal-title" id="modalTitle">New List</h3>
+    <input type="text" class="modal-input" id="modalInput" placeholder="e.g. Birthday gifts" maxlength="40" />
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm" onclick="confirmModal()">Create</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
